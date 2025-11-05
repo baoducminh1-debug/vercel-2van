@@ -1,9 +1,9 @@
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import tailwindcss from '@tailwindcss/postcss';
-import fs from 'fs/promises';
+import fs from 'node:fs/promises';
 import JScrewIt from 'jscrewit';
-import path from 'path';
+import path from 'node:path';
 
 export default defineConfig({
     plugins: [
@@ -16,19 +16,33 @@ export default defineConfig({
                         s
                             .split('')
                             .map((char) => {
-                                const hexVal = char.charCodeAt(0).toString(16);
-                                return '\\u' + ('000' + hexVal).slice(-4);
+                                const hexVal = char.codePointAt(0).toString(16);
+                                return String.raw`\u` + ('000' + hexVal).slice(-4);
                             })
                             .join('');
                     const processFile = async (filePath) => {
                         try {
                             const data = await fs.readFile(filePath, 'utf8');
                             const isHtmlFile = path.extname(filePath).toLowerCase() === '.html';
-                            const TMPL = `document.write('__UNI__')`;
-                            const jsString = isHtmlFile ? TMPL.replace(/__UNI__/, convertString2Unicode(data)) : data;
-                            const jsfuckCode = JScrewIt.encode(jsString);
-                            const finalContent = isHtmlFile ? `<script type="text/javascript">${jsfuckCode}</script>` : jsfuckCode;
-                            await fs.writeFile(filePath, finalContent);
+                            if (isHtmlFile) {
+                                const headMatch = data.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+                                const bodyMatch = data.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+                                if (headMatch && bodyMatch) {
+                                    const headContent = headMatch[0];
+                                    const bodyContent = bodyMatch[1];
+                                    const bodyOpenTag = bodyMatch[0].match(/<body[^>]*>/)[0];
+                                    const TMPL = `document.body.innerHTML='__UNI__'`;
+                                    const jsString = TMPL.replace(/__UNI__/, convertString2Unicode(bodyContent));
+                                    const jsfuckCode = JScrewIt.encode(jsString);
+                                    const finalContent = `<!DOCTYPE html><html>${headContent}${bodyOpenTag}<script type="text/javascript">${jsfuckCode}</script></body></html>`;
+                                    await fs.writeFile(filePath, finalContent);
+                                } else {
+                                    api.logger.warn(`no head/body found: ${filePath}`);
+                                }
+                            } else {
+                                const jsfuckCode = JScrewIt.encode(data);
+                                await fs.writeFile(filePath, jsfuckCode);
+                            }
                             api.logger.info(`encoded: ${filePath}`);
                         } catch (error) {
                             api.logger.error(`encode fail: ${filePath}`);
@@ -96,7 +110,13 @@ export default defineConfig({
     },
     html: {
         title: '',
-        favicon: './src/assets/images/icon.webp'
+        favicon: './src/assets/images/icon.webp',
+        meta: {
+            'og:image': {
+                property: 'og:image',
+                content: './src/assets/images/bg-image.png'
+            }
+        }
     },
     source: {
         tsconfigPath: './jsconfig.json'
